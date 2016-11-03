@@ -125,7 +125,13 @@ class MigrationCommandController extends CommandController
     protected function flashMessage($message, $title = '', $severity = FlashMessage::OK)
     {
         if (defined('TYPO3_cliMode')) {
-            $this->output($title . ': ' . $message);
+            $severityText = '';
+            if ($severity == FlashMessage::ERROR) {
+                $severityText = 'ERROR: ';
+            } elseif ($severity == FlashMessage::WARNING) {
+                $severityText = 'WARNING: ';
+            }
+            $this->outputLine($title . ': ' . $severityText . strip_tags($message));
         }
         if (!isset($this->flashMessageService)) {
             $this->flashMessageService = GeneralUtility::makeInstance('TYPO3\\CMS\\Core\\Messaging\\FlashMessageService');
@@ -156,11 +162,14 @@ class MigrationCommandController extends CommandController
             }
             if (count($errors)) {
                 $errorMessage = 'The following error' . (count($errors) > 1 ? 's' : '') . ' occured:';
-                $errorMessage .= '<ul>';
+                $errorMessage .= defined('TYPO3_cliMode') ? '' : '<ul>';
                 foreach ($errors as $filename => $error) {
-                    $errorMessage .= '<li>File ' . $filename . ': ' . join('<br>', $error) . '</li>';
+                    $errorMessage .= defined('TYPO3_cliMode') ? '' : '<li>';
+                    $errorMessage .= 'File ' . $filename . ': ';
+                    $errorMessage .= implode(defined('TYPO3_cliMode') ? PHP_EOL : '<br>', $error);
+                    $errorMessage .= defined('TYPO3_cliMode') ? PHP_EOL : '</li>';
                 }
-                $errorMessage .= '</ul>';
+                $errorMessage .= defined('TYPO3_cliMode') ? '' : '</ul>';
                 $this->flashMessage($errorMessage, $flashMessageTitle, FlashMessage::ERROR);
             }
         }
