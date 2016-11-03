@@ -45,37 +45,69 @@ class MigrationCommandController extends CommandController
     }
 
     /**
-     *
+     * @deprecated Use migrateCommand instead
      */
     public function migrateSqlFilesCommand()
     {
+        $this->flashMessage('The "migration:migrateSqlFiles" command is deprecated. Please use "migration:migrateAll" command instead.', 'Migration Command',
+                FlashMessage::WARNING);
+        $this->migrateAllCommand();
+    }
+
+    /**
+     *
+     */
+    public function migrateAllCommand()
+    {
         $this->initialize();
-        $sqlFolderPath = realpath(PATH_site . $this->extensionConfiguration['sqlFolderPath']);
-        if (!$sqlFolderPath) {
-            GeneralUtility::mkdir_deep(PATH_site . $this->extensionConfiguration['sqlFolderPath']);
-            $sqlFolderPath = realpath(PATH_site . $this->extensionConfiguration['sqlFolderPath']);
-            if (!$sqlFolderPath) {
-                $message = 'SQL folder not found. Please make sure "' . htmlspecialchars($this->extensionConfiguration['sqlFolderPath']) . '" (relative to your web root) exists!';
+        $pathFromConfig = null;
+        if (empty($this->extensionConfiguration['migrationFolderPath'])) {
+            $this->flashMessage('The "sqlFolderPath" configuration is deprecated. Please use "migrationFolderPath" instead.',
+                    'Migration Command', FlashMessage::WARNING);
+            $pathFromConfig = PATH_site . $this->extensionConfiguration['sqlFolderPath'];
+        } else {
+            $pathFromConfig = PATH_site . $this->extensionConfiguration['migrationFolderPath'];
+        }
+        $migrationFolderPath = realpath($pathFromConfig);
+
+        if (!$migrationFolderPath) {
+            GeneralUtility::mkdir_deep($pathFromConfig);
+            $migrationFolderPath = realpath($pathFromConfig);
+            if (!$migrationFolderPath) {
+                $message = 'Migration folder not found. Please make sure "' . htmlspecialchars($pathFromConfig) . '" exists!';
                 $this->flashMessage($message, 'Migration Command', FlashMessage::ERROR);
             }
             return;
         }
-        $iterator = new \DirectoryIterator($sqlFolderPath);
+
+        $this->flashMessage('Migration path: ' . $migrationFolderPath, 'Migration Command', FlashMessage::INFO);
+
+        $iterator = new \DirectoryIterator($migrationFolderPath);
         $highestExecutedVersion = 0;
         $errors = array();
         $executedFiles = 0;
         foreach ($iterator as $fileinfo) {
             /** @var $fileinfo \DirectoryIterator */
-            if ($fileinfo->getExtension() === 'sql') {
-                $executedVersion = $this->migrateSqlFile($fileinfo, $errors);
-                // migration stops on the 1st erroneous sql file
-                if (count($errors)) {
-                    break;
-                }
-                if ($executedVersion) {
-                    $executedFiles++;
-                    $highestExecutedVersion = max($highestExecutedVersion, $executedVersion);
-                }
+
+            $fileVersion = (int)$fileinfo->getBasename('.' . $fileinfo->getExtension());
+            if ($fileVersion <= $this->lastExecutedVersion) {
+                continue;
+            }
+
+            $success = false;
+            switch ($fileinfo->getExtension()) {
+                case 'sql':
+                    $success = $this->migrateSqlFile($fileinfo, $errors);
+            }
+
+            // migration stops on the 1st erroneous sql file
+            if (!$success || count($errors) > 0) {
+                break;
+            }
+
+            if ($success) {
+                $executedFiles++;
+                $highestExecutedVersion = max($highestExecutedVersion, $fileVersion);
             }
         }
         $this->enqueueFlashMessages($executedFiles, $errors);
@@ -86,35 +118,36 @@ class MigrationCommandController extends CommandController
     /**
      * @param \DirectoryIterator $fileinfo
      * @param array $errors
-     * @return int
+     * @return bool
      */
     protected function migrateSqlFile(\DirectoryIterator $fileinfo, &$errors)
     {
-        $fileVersion = (int)$fileinfo->getBasename('.sql');
-        if ($fileVersion > $this->lastExecutedVersion) {
-            $filePath = $fileinfo->getPathname();
-            $shellCommand = sprintf(
-                    $this->shellCommandTemplate,
-                    $this->extensionConfiguration['mysqlBinaryPath'],
-                    $GLOBALS['TYPO3_CONF_VARS']['DB']['username'],
-                    $GLOBALS['TYPO3_CONF_VARS']['DB']['password'],
-                    $GLOBALS['TYPO3_CONF_VARS']['DB']['host'],
-                    $GLOBALS['TYPO3_CONF_VARS']['DB']['database'],
-                    $filePath
-            );
-            $output = shell_exec($shellCommand);
-            $ouputMessages = explode("\n", $output);
-            foreach ($ouputMessages as $ouputMessage) {
-                if (trim($ouputMessage) && strpos($ouputMessage, 'Warning') === false) {
-                    if (!is_array($errors[$fileinfo->getFilename()])) {
-                        $errors[$fileinfo->getFilename()] = array();
-                    }
-                    $errors[$fileinfo->getFilename()][] = $ouputMessage;
-                }
-            }
-            return $fileVersion;
+        $filePath = $fileinfo->getPathname();
+
+        if (!is_array($errors[$fileinfo->getFilename()])) {
+            $errors[$fileinfo->getFilename()] = array();
         }
-        return null;
+
+        $shellCommand = sprintf(
+                $this->shellCommandTemplate,
+                $this->extensionConfiguration['mysqlBinaryPath'],
+                $GLOBALS['TYPO3_CONF_VARS']['DB']['username'],
+                $GLOBALS['TYPO3_CONF_VARS']['DB']['password'],
+                $GLOBALS['TYPO3_CONF_VARS']['DB']['host'],
+                $GLOBALS['TYPO3_CONF_VARS']['DB']['database'],
+                $filePath
+        );
+
+        $output = shell_exec($shellCommand);
+
+        $outputMessages = explode("\n", $output);
+        foreach ($outputMessages as $outputMessage) {
+            if (trim($outputMessage) && strpos($outputMessage, 'Warning') === false) {
+                $errors[$fileinfo->getFilename()][] = $outputMessage;
+            }
+        }
+
+        return count($errors[$fileinfo->getFilename()]) === 0;
     }
 
     /**
