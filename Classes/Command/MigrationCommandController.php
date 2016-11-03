@@ -94,14 +94,27 @@ class MigrationCommandController extends CommandController
                 continue;
             }
 
+            $this->flashMessage('execute ' . $fileinfo->getBasename(), 'Migration Command', FlashMessage::INFO);
+
             $success = false;
+            $migrationErrors = array();
+            $migrationOutput = '';
             switch ($fileinfo->getExtension()) {
                 case 'sql':
-                    $success = $this->migrateSqlFile($fileinfo, $errors);
+                    $success = $this->migrateSqlFile($fileinfo, $migrationErrors, $migrationOutput);
+                    break;
+                case 'typo3cms':
+                    $success = $this->migrateTypo3CmsFile($fileinfo, $migrationErrors, $migrationOutput);
+                    break;
             }
 
+            $this->flashMessage('done ' . $fileinfo->getBasename() . ' ' . ($success ? 'OK' : 'ERROR'), 'Migration Command', FlashMessage::INFO);
+
+            $this->outputLine(trim($migrationOutput) . PHP_EOL);
+
             // migration stops on the 1st erroneous sql file
-            if (!$success || count($errors) > 0) {
+            if (!$success || count($migrationErrors) > 0) {
+                $errors[$fileinfo->getFilename()] = $migrationErrors;
                 break;
             }
 
@@ -110,23 +123,24 @@ class MigrationCommandController extends CommandController
                 $highestExecutedVersion = max($highestExecutedVersion, $fileVersion);
             }
         }
+
         $this->enqueueFlashMessages($executedFiles, $errors);
+
         $this->registry->set('AppZap\\Migrator', 'lastExecutedVersion',
                 max($this->lastExecutedVersion, $highestExecutedVersion));
+
+        $this->sendAndExit(count($errors) > 0 ? 1 : 0);
     }
 
     /**
      * @param \DirectoryIterator $fileinfo
      * @param array $errors
+     * @param string $output
      * @return bool
      */
-    protected function migrateSqlFile(\DirectoryIterator $fileinfo, &$errors)
+    protected function migrateSqlFile(\DirectoryIterator $fileinfo, &$errors, &$output)
     {
         $filePath = $fileinfo->getPathname();
-
-        if (!is_array($errors[$fileinfo->getFilename()])) {
-            $errors[$fileinfo->getFilename()] = array();
-        }
 
         $shellCommand = sprintf(
                 $this->shellCommandTemplate,
@@ -142,12 +156,37 @@ class MigrationCommandController extends CommandController
 
         $outputMessages = explode("\n", $output);
         foreach ($outputMessages as $outputMessage) {
-            if (trim($outputMessage) && strpos($outputMessage, 'Warning') === false) {
-                $errors[$fileinfo->getFilename()][] = $outputMessage;
+            if (trim($outputMessage) && strpos($outputMessage, 'ERROR') !== false) {
+                $errors[] = $outputMessage;
             }
         }
 
-        return count($errors[$fileinfo->getFilename()]) === 0;
+        return count($errors) === 0;
+    }
+
+    /**
+     * @param \DirectoryIterator $fileinfo
+     * @param array $errors
+     * @param string $output
+     * @return bool
+     */
+    protected function migrateTypo3CmsFile($fileinfo, &$errors, &$output)
+    {
+        $migrationContent = file_get_contents($fileinfo->getPathname());
+        foreach (explode(PHP_EOL, $migrationContent) as $line) {
+            $line = trim($line);
+            if (!empty($line) && substr($line, 0, 1) != '#' && substr($line, 0, 2) != '//') {
+                $outputLines = array();
+                $status = null;
+                exec('./typo3cms ' . $line, $outputLines, $status);
+                $output = implode(PHP_EOL, $outputLines);
+                if ($status != 0) {
+                    $errors[] = $output;
+                    break;
+                }
+            }
+        }
+        return count($errors) === 0;
     }
 
     /**
@@ -165,10 +204,13 @@ class MigrationCommandController extends CommandController
                 $severityText = 'WARNING: ';
             }
             $this->outputLine($title . ': ' . $severityText . strip_tags($message));
+            return;
         }
+
         if (!isset($this->flashMessageService)) {
             $this->flashMessageService = GeneralUtility::makeInstance('TYPO3\\CMS\\Core\\Messaging\\FlashMessageService');
         }
+
         /** @var $defaultFlashMessageQueue \TYPO3\CMS\Core\Messaging\FlashMessageQueue */
         $defaultFlashMessageQueue = $this->flashMessageService->getMessageQueueByIdentifier();
         $defaultFlashMessageQueue->enqueue(
