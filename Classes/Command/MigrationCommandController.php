@@ -19,11 +19,6 @@ class MigrationCommandController extends CommandController
     protected $extensionConfiguration;
 
     /**
-     * @var int
-     */
-    protected $lastExecutedVersion;
-
-    /**
      * @var string
      */
     protected $shellCommandTemplate = '%s --default-character-set=UTF8 -u"%s" -p"%s" -h "%s" -D "%s" -e "source %s" 2>&1';
@@ -41,7 +36,6 @@ class MigrationCommandController extends CommandController
     {
         $this->databaseConnection = $GLOBALS['TYPO3_DB'];
         $this->extensionConfiguration = unserialize($GLOBALS['TYPO3_CONF_VARS']['EXT']['extConf']['migrator']);
-        $this->lastExecutedVersion = (int)$this->registry->get('AppZap\\Migrator', 'lastExecutedVersion');
     }
 
     /**
@@ -90,7 +84,19 @@ class MigrationCommandController extends CommandController
             /** @var $fileinfo \DirectoryIterator */
 
             $fileVersion = (int)$fileinfo->getBasename('.' . $fileinfo->getExtension());
-            if ($fileVersion <= $this->lastExecutedVersion) {
+
+            if ($fileinfo->getType() != 'file') {
+                continue;
+            }
+
+            $migrationStatus = $this->registry->get(
+                    'AppZap\\Migrator',
+                    'migrationStatus:' . $fileinfo->getBasename(),
+                    array('tstamp' => null, 'success' => false)
+            );
+
+            if ($migrationStatus['success']) {
+                // already successfully executed
                 continue;
             }
 
@@ -106,6 +112,9 @@ class MigrationCommandController extends CommandController
                 case 'typo3cms':
                     $success = $this->migrateTypo3CmsFile($fileinfo, $migrationErrors, $migrationOutput);
                     break;
+                default:
+                    // ignore other files
+                    $success = true;
             }
 
             $this->flashMessage('done ' . $fileinfo->getBasename() . ' ' . ($success ? 'OK' : 'ERROR'), 'Migration Command', FlashMessage::INFO);
@@ -122,12 +131,15 @@ class MigrationCommandController extends CommandController
                 $executedFiles++;
                 $highestExecutedVersion = max($highestExecutedVersion, $fileVersion);
             }
+
+            $this->registry->set(
+                    'AppZap\\Migrator',
+                    'migrationStatus:' . $fileinfo->getBasename(),
+                    array('tstamp' => time(), 'success' => $success)
+            );
         }
 
         $this->enqueueFlashMessages($executedFiles, $errors);
-
-        $this->registry->set('AppZap\\Migrator', 'lastExecutedVersion',
-                max($this->lastExecutedVersion, $highestExecutedVersion));
 
         $this->sendAndExit(count($errors) > 0 ? 1 : 0);
     }
