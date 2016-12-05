@@ -112,6 +112,9 @@ class MigrationCommandController extends CommandController
                 case 'typo3cms':
                     $success = $this->migrateTypo3CmsFile($fileinfo, $migrationErrors, $migrationOutput);
                     break;
+                case 'sh':
+                    $success = $this->migrateShellFile($fileinfo, $migrationErrors, $migrationOutput);
+                    break;
                 default:
                     // ignore other files
                     $success = true;
@@ -197,6 +200,26 @@ class MigrationCommandController extends CommandController
                     break;
                 }
             }
+        }
+        return count($errors) === 0;
+    }
+
+    /**
+     * @param \DirectoryIterator $fileinfo
+     * @param array $errors
+     * @param string $output
+     * @return bool
+     */
+    protected function migrateShellFile($fileinfo, &$errors, &$output)
+    {
+        $command = $fileinfo->getPathname();
+        $outputLines = array();
+        $status = null;
+        chdir(PATH_site);
+        exec($command, $outputLines, $status);
+        $output = implode(PHP_EOL, $outputLines);
+        if ($status != 0) {
+            $errors[] = $output;
         }
         return count($errors) === 0;
     }
