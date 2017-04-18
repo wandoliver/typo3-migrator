@@ -1,6 +1,8 @@
 <?php
 namespace AppZap\Migrator\Command;
 
+use AppZap\Migrator\DirectoryIterator\SortableDirectoryIterator;
+use SplFileInfo;
 use TYPO3\CMS\Core\Messaging\FlashMessage;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Extbase\Mvc\Controller\CommandController;
@@ -76,12 +78,15 @@ class MigrationCommandController extends CommandController
 
         $this->flashMessage('Migration path: ' . $migrationFolderPath, 'Migration Command', FlashMessage::INFO);
 
-        $iterator = new \DirectoryIterator($migrationFolderPath);
+        $iterator = new SortableDirectoryIterator($migrationFolderPath);
+//        $iterator = new \DirectoryIterator($migrationFolderPath);
+
         $highestExecutedVersion = 0;
         $errors = array();
         $executedFiles = 0;
         foreach ($iterator as $fileinfo) {
-            /** @var $fileinfo \DirectoryIterator */
+
+            /** @var $fileinfo SplFileInfo */
 
             $fileVersion = (int)$fileinfo->getBasename('.' . $fileinfo->getExtension());
 
@@ -95,6 +100,7 @@ class MigrationCommandController extends CommandController
                     array('tstamp' => null, 'success' => false)
             );
 
+
             if ($migrationStatus['success']) {
                 // already successfully executed
                 continue;
@@ -102,7 +108,6 @@ class MigrationCommandController extends CommandController
 
             $this->flashMessage('execute ' . $fileinfo->getBasename(), 'Migration Command', FlashMessage::INFO);
 
-            $success = false;
             $migrationErrors = array();
             $migrationOutput = '';
             switch ($fileinfo->getExtension()) {
@@ -148,12 +153,12 @@ class MigrationCommandController extends CommandController
     }
 
     /**
-     * @param \DirectoryIterator $fileinfo
+     * @param SplFileInfo $fileinfo
      * @param array $errors
      * @param string $output
      * @return bool
      */
-    protected function migrateSqlFile(\DirectoryIterator $fileinfo, &$errors, &$output)
+    protected function migrateSqlFile(SplFileInfo $fileinfo, &$errors, &$output)
     {
         $filePath = $fileinfo->getPathname();
 
@@ -180,7 +185,7 @@ class MigrationCommandController extends CommandController
     }
 
     /**
-     * @param \DirectoryIterator $fileinfo
+     * @param SplFileInfo $fileinfo
      * @param array $errors
      * @param string $output
      * @return bool
@@ -205,7 +210,7 @@ class MigrationCommandController extends CommandController
     }
 
     /**
-     * @param \DirectoryIterator $fileinfo
+     * @param SplFileInfo $fileinfo
      * @param array $errors
      * @param string $output
      * @return bool
